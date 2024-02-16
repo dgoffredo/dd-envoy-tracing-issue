@@ -10,6 +10,7 @@ import (
 func run() error {
 	m := http.NewServeMux()
 	m.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
+		log.Println("handling request")
 		writer.WriteHeader(http.StatusOK)
 	})
 

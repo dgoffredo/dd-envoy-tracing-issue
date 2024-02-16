@@ -1,23 +1,26 @@
 version: '3'
 services:
-  datadog_agent:
-    volumes:
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-      - '/run/user:/run/user:ro'
-      - '/proc/:/host/proc/:ro'
-      - '/sys/fs/cgroup/:/host/sys/fs/cgroup:ro'
-    environment:
-      - DOCKER_HOST
-      - DD_API_KEY
-      - DD_ENV=local
-      - DD_TAGS=env:local
-      - DD_APM_ENABLED=true
-      - DD_LOG_LEVEL=ERROR
-    ports:
-      - 8126:8126
-    image: 'datadog/agent@sha256:1d9b8e28704b207626cdeca5386019f673d9f3a9baf817f5094b8e08b1f99fca'
+  # datadog_agent:
+  #   volumes:
+  #     - '/var/run/docker.sock:/var/run/docker.sock:ro'
+  #     - '/run/user:/run/user:ro'
+  #     - '/proc/:/host/proc/:ro'
+  #     - '/sys/fs/cgroup/:/host/sys/fs/cgroup:ro'
+  #   environment:
+  #     - DOCKER_HOST
+  #     - DD_API_KEY
+  #     - DD_ENV=local
+  #     - DD_TAGS=env:local
+  #     - DD_APM_ENABLED=true
+  #     - DD_LOG_LEVEL=ERROR
+  #   image: 'datadog/agent@sha256:1d9b8e28704b207626cdeca5386019f673d9f3a9baf817f5094b8e08b1f99fca'
 
-  envoy:
+  datadog_agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+
+  envoy-1.18:
     environment:
       - 'DD_TRACE_SAMPLING_RULES=[{"sample_rate": 0.1}]'
     links:
@@ -30,10 +33,39 @@ services:
       - /usr/local/bin/envoy
       - -c
       - /etc/envoy/envoy.yaml
-    ports:
-      - 10000:10000
     volumes:
       - ./scripts/envoy:/etc/envoy
+
+  envoy-1.19:
+    environment:
+      - 'DD_TRACE_SAMPLING_RULES=[{"sample_rate": 0.1}]'
+    links:
+      - datadog_agent
+      - sidecar
+    # (new library) : docker.io/istio/proxyv2:1.19.5 - has the issue
+    # (old library) : docker.io/istio/proxyv2:1.18.5 - does not have the issue
+    image: docker.io/istio/proxyv2:1.19.5
+    entrypoint:
+      - /usr/local/bin/envoy
+      - -c
+      - /etc/envoy/envoy.yaml
+    volumes:
+      - ./scripts/envoy:/etc/envoy
+
+  envoy-local:
+    environment:
+      - 'DD_TRACE_SAMPLING_RULES=[{"sample_rate": 0.1}]'
+    image: ubuntu:22.04
+    links:
+      - datadog_agent
+      - sidecar
+    entrypoint:
+      - /usr/local/bin/envoy
+      - -c
+      - /etc/envoy/envoy.yaml
+    volumes:
+      - ./scripts/envoy:/etc/envoy
+      - /home/david/src/envoy/bazel-bin/source/exe/envoy-static:/usr/local/bin/envoy:ro
 
   sidecar:
     build:
@@ -42,6 +74,13 @@ services:
         - "linux/amd64"
       dockerfile: Dockerfile
       target: sidecar
-    ports:
-      - 8080:8080
     command: ["/ingress-sidecar"]
+
+  client:
+    image: docker.io/curlimages/curl
+    links:
+      - datadog_agent
+      - envoy-1.18
+      - envoy-1.19
+      - envoy-local
+      - sidecar
